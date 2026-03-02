@@ -112,6 +112,7 @@ class ApiClient:
             url=self.settings.build_auth_url(),
             headers=headers,
             params=params,
+            request_name="auth",
         )
 
         try:
@@ -142,13 +143,37 @@ class ApiClient:
             headers=headers,
             params=params,
             stream=True,
+            request_name="data",
+            table_name=table_name,
         )
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
+        bytes_written = 0
         with output_file.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     handle.write(chunk)
+                    bytes_written += len(chunk)
+
+        content_type = response.headers.get("Content-Type", "")
+        LOGGER.info(
+            "Download CSV response",
+            extra={
+                "context": {
+                    "table": table_name,
+                    "url": data_url,
+                    "status_code": response.status_code,
+                    "content_type": content_type,
+                    "bytes_written": bytes_written,
+                    "output_file": str(output_file),
+                }
+            },
+        )
+        if bytes_written == 0:
+            raise RuntimeError(
+                f"Downloaded file was empty for table {table_name}. "
+                f"status={response.status_code}, content_type={content_type or 'unknown'}"
+            )
 
     def _fetch_control_count_with_token(
         self,
@@ -163,6 +188,8 @@ class ApiClient:
             url=control_url,
             headers=headers,
             params=params,
+            request_name="control",
+            table_name=table_name,
         )
         return self._parse_control_count(response)
 
@@ -173,10 +200,21 @@ class ApiClient:
         headers: dict[str, str],
         params: dict[str, str],
         stream: bool = False,
+        request_name: str = "api",
+        table_name: str | None = None,
     ) -> requests.Response:
         max_attempts = self.settings.max_retries + 1
         for attempt in range(1, max_attempts + 1):
             try:
+                self._log_request(
+                    request_name=request_name,
+                    method=method,
+                    url=url,
+                    params=params,
+                    stream=stream,
+                    table_name=table_name,
+                    attempt=attempt,
+                )
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -215,6 +253,28 @@ class ApiClient:
                 raise RuntimeError(f"API request failed for {url}: {exc}") from exc
 
         raise RetryableApiError(f"API request exhausted retries for {url}.")
+
+    def _log_request(
+        self,
+        request_name: str,
+        method: str,
+        url: str,
+        params: dict[str, str],
+        stream: bool,
+        table_name: str | None,
+        attempt: int,
+    ) -> None:
+        context: dict[str, Any] = {
+            "request_name": request_name,
+            "method": method,
+            "url": url,
+            "params": params,
+            "stream": stream,
+            "attempt": attempt,
+        }
+        if table_name:
+            context["table"] = table_name
+        LOGGER.info("Calling API", extra={"context": context})
 
     def count_downloaded_rows(self, output_file: Path) -> int:
         with output_file.open("r", encoding="utf-8", newline="") as handle:
