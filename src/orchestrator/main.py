@@ -52,11 +52,38 @@ def load_tables(args: argparse.Namespace, settings: Settings) -> list[str]:
     return unique_tables
 
 
-def resolve_business_date(raw_value: str | None) -> str:
+def resolve_business_date(settings: Settings, raw_value: str | None) -> str:
     if raw_value:
-        datetime.strptime(raw_value, "%Y%m%d")
-        return raw_value
-    return datetime.now().strftime("%Y%m%d")
+        for input_format in _candidate_asofdate_input_formats(settings):
+            try:
+                parsed_date = datetime.strptime(raw_value, input_format)
+                return _format_asofdate(settings, parsed_date)
+            except ValueError:
+                continue
+        raise ValueError(
+            "Invalid --asofdate value. Supported inputs include yyyyMMdd and the configured "
+            f"API format {settings.asofdate_format!r}."
+        )
+    return _format_asofdate(settings, datetime.now())
+
+
+def _candidate_asofdate_input_formats(settings: Settings) -> list[str]:
+    candidates = [
+        "%Y%m%d",
+        settings.asofdate_format,
+        "%d-%b-%Y",
+        "%d-%B-%Y",
+    ]
+    unique_candidates: list[str] = []
+    for candidate in candidates:
+        if candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def _format_asofdate(settings: Settings, value: datetime) -> str:
+    formatted = value.strftime(settings.asofdate_format)
+    return formatted.upper() if settings.asofdate_uppercase else formatted
 
 
 def cleanup_run_dir(run_dir: Path) -> None:
@@ -73,7 +100,7 @@ def main() -> int:
     if not tables:
         raise ValueError("No tables were provided. Use --tables or --table-file.")
 
-    business_date = resolve_business_date(args.asofdate)
+    business_date = resolve_business_date(settings, args.asofdate)
     run_id = datetime.now().strftime("%Y%m%d%H%M%S")
     run_dir = settings.work_dir / run_id
 
@@ -91,8 +118,9 @@ def main() -> int:
             client.get_valid_token()
         metrics.increment("auth_success")
 
-        with metrics.track("ensure_hdfs_dir", hdfs_target_dir=settings.hdfs_target_dir):
-            ensure_hdfs_dir(settings.hdfs_target_dir)
+        if settings.hdfs_enabled:
+            with metrics.track("ensure_hdfs_dir", hdfs_target_dir=settings.hdfs_target_dir):
+                ensure_hdfs_dir(settings.hdfs_target_dir)
 
         failures: list[dict[str, str]] = []
 
@@ -139,9 +167,12 @@ def main() -> int:
                         else:
                             metrics.increment("control_validation_success")
 
-                with metrics.track("upload_hdfs", table=table):
-                    upload_file(file_path, settings.hdfs_target_dir)
-                metrics.increment("uploads_success")
+                if settings.hdfs_enabled:
+                    with metrics.track("upload_hdfs", table=table):
+                        upload_file(file_path, settings.hdfs_target_dir)
+                    metrics.increment("uploads_success")
+                else:
+                    metrics.increment("uploads_skipped")
 
                 if settings.cleanup_local_files:
                     with metrics.track("cleanup_file", table=table):

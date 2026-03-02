@@ -36,6 +36,8 @@ Example [config.yaml](/Users/raaj/Documents/New%20project/config.yaml):
 api:
   base_url: "https://internal.company.com"
   verify_ssl: false
+  asofdate_format: "%d-%b-%Y"
+  asofdate_uppercase: true
   auth:
     path: "/auth/token"
     method: "GET"
@@ -73,6 +75,7 @@ orchestrator:
   cleanup_local_files: true
   fail_fast: false
 hdfs:
+  enabled: true
   target_dir: "/data/raw/internal_api"
 tables:
   - customers
@@ -94,9 +97,11 @@ PYTHONPATH=src python -m orchestrator.main --config config.mock.yaml --asofdate 
 ```
 
 The `data.path_template` can include `{table_name}`, `{business_date}`, and `{asofdate}` placeholders.
+`api.asofdate_format: "%d-%b-%Y"` plus `api.asofdate_uppercase: true` produces values like `18-AUG-2025`.
 Set `api.verify_ssl: false` to match `curl -k` for internal certificates.
 If `api.control.enabled: true`, the orchestrator calls the optional control API with the same bearer token and validates the downloaded row count.
 The `tables` list, local `orchestrator.download_dir`, and `hdfs.target_dir` can all be defined in the config file and used without CLI table input.
+Set `hdfs.enabled: false` to skip HDFS upload entirely.
 
 ### Environment variables
 
@@ -107,6 +112,8 @@ export API_AUTH_URL="https://internal.company.com/auth"
 export API_DATA_URL="https://internal.company.com/export"
 export API_BASE_URL="https://internal.company.com"
 export API_VERIFY_SSL="false"
+export API_ASOFDATE_FORMAT="%d-%b-%Y"
+export API_ASOFDATE_UPPERCASE="true"
 export API_AUTH_PATH="/auth/token"
 export API_DATA_PATH_TEMPLATE="/data/table={table_name}/asofdate={asofdate}"
 export API_CONTROL_ENABLED="false"
@@ -120,6 +127,7 @@ export API_CONTROL_STRICT="true"
 export API_CONTROL_EXCLUDE_HEADER="true"
 export API_CLIENT_ID="your-client-id"
 export API_SECRET="your-secret"
+export HDFS_ENABLED="true"
 export HDFS_TARGET_DIR="/data/raw/internal_api"
 ```
 
@@ -200,6 +208,16 @@ If you want the whole run driven by config only, this is enough:
 ```bash
 PYTHONPATH=src python -m orchestrator.main --config config.yaml --asofdate 20260301
 ```
+
+If you want to skip HDFS movement for a local test run:
+
+```yaml
+hdfs:
+  enabled: false
+```
+
+With the sample config above, `--asofdate 20260301` is rendered to the API as `01-MAR-2026`.
+You can also pass the API-formatted value directly, for example `--asofdate 18-AUG-2025`.
 
 Optional control API example matching your curl:
 

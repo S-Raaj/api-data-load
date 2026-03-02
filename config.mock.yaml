@@ -1,6 +1,8 @@
 api:
   base_url: "https://internal.company.com"
   verify_ssl: false
+  asofdate_format: "%d-%b-%Y"
+  asofdate_uppercase: true
   auth:
     path: "/auth/token"
     method: "GET"
@@ -42,6 +44,7 @@ orchestrator:
   fail_fast: false
 
 hdfs:
+  enabled: true
   target_dir: "/data/raw/internal_api"
 
 tables:

@@ -20,6 +20,7 @@ class Settings:
     client_id: str
     api_secret: str
     hdfs_target_dir: str
+    hdfs_enabled: bool = True
     base_url: str = ""
     auth_path: str = ""
     data_path_template: str = ""
@@ -34,6 +35,8 @@ class Settings:
     control_strict: bool = True
     control_exclude_header: bool = True
     verify_ssl: bool = True
+    asofdate_format: str = "%Y%m%d"
+    asofdate_uppercase: bool = False
     auth_method: str = "GET"
     data_method: str = "GET"
     secret_header: str = "X-API-SECRET"
@@ -98,6 +101,9 @@ class Settings:
             client_id=os.getenv("API_CLIENT_ID", str(auth_config.get("client_id", ""))),
             api_secret=os.getenv("API_SECRET", str(auth_config.get("secret", ""))),
             hdfs_target_dir=os.getenv("HDFS_TARGET_DIR", str(hdfs_target_dir)),
+            hdfs_enabled=_read_bool(
+                "HDFS_ENABLED", bool(hdfs_config.get("enabled", True))
+            ),
             base_url=base_url,
             auth_path=auth_path,
             data_path_template=data_path_template,
@@ -134,6 +140,12 @@ class Settings:
             ),
             verify_ssl=_read_bool(
                 "API_VERIFY_SSL", bool(api_config.get("verify_ssl", True))
+            ),
+            asofdate_format=os.getenv(
+                "API_ASOFDATE_FORMAT", str(api_config.get("asofdate_format", "%Y%m%d"))
+            ),
+            asofdate_uppercase=_read_bool(
+                "API_ASOFDATE_UPPERCASE", bool(api_config.get("asofdate_uppercase", False))
             ),
             auth_method=os.getenv("API_AUTH_METHOD", str(auth_config.get("method", "GET"))).upper(),
             data_method=os.getenv("API_DATA_METHOD", str(data_config.get("method", "GET"))).upper(),
@@ -248,7 +260,7 @@ class Settings:
             missing_fields.append("api.auth.client_id")
         if not self.api_secret:
             missing_fields.append("api.auth.secret")
-        if not self.hdfs_target_dir:
+        if self.hdfs_enabled and not self.hdfs_target_dir:
             missing_fields.append("hdfs.target_dir")
         if not self.auth_url and not (self.base_url and self.auth_path):
             missing_fields.append("api.auth.url or api.base_url + api.auth.path")
