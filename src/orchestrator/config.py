@@ -24,11 +24,16 @@ class Settings:
     base_url: str = ""
     auth_path: str = ""
     data_path_template: str = ""
+    data_response_format: str = "csv"
+    data_file_extension: str = "csv"
+    data_csv_delimiter: str = ","
+    data_accept_header: str = ""
     control_url: str = ""
     control_path_template: str = ""
     control_enabled: bool = False
     control_method: str = "GET"
     control_response_format: str = "json"
+    control_accept_header: str = ""
     control_count_field: str = "lastUploadCount"
     control_date_field: str = "lastUploadDate"
     control_selection_strategy: str = "latest"
@@ -107,6 +112,32 @@ class Settings:
             base_url=base_url,
             auth_path=auth_path,
             data_path_template=data_path_template,
+            data_response_format=os.getenv(
+                "API_DATA_RESPONSE_FORMAT",
+                str(data_config.get("response_format", "csv")),
+            ).lower(),
+            data_file_extension=os.getenv(
+                "API_DATA_FILE_EXTENSION",
+                str(data_config.get("file_extension", "")),
+            ).lower()
+            or _default_file_extension(
+                str(data_config.get("response_format", "csv")).lower()
+            ),
+            data_csv_delimiter=os.getenv(
+                "API_DATA_CSV_DELIMITER",
+                str(data_config.get("csv_delimiter", ",")),
+            ),
+            data_accept_header=os.getenv(
+                "API_DATA_ACCEPT_HEADER",
+                str(
+                    data_config.get(
+                        "accept_header",
+                        _default_accept_header(
+                            str(data_config.get("response_format", "csv")).lower()
+                        ),
+                    )
+                ),
+            ),
             control_url=control_url,
             control_path_template=os.getenv(
                 "API_CONTROL_PATH_TEMPLATE", str(control_config.get("path_template", ""))
@@ -121,6 +152,17 @@ class Settings:
                 "API_CONTROL_RESPONSE_FORMAT",
                 str(control_config.get("response_format", "json")),
             ).lower(),
+            control_accept_header=os.getenv(
+                "API_CONTROL_ACCEPT_HEADER",
+                str(
+                    control_config.get(
+                        "accept_header",
+                        _default_accept_header(
+                            str(control_config.get("response_format", "json")).lower()
+                        ),
+                    )
+                ),
+            ),
             control_count_field=os.getenv(
                 "API_CONTROL_COUNT_FIELD", str(control_config.get("count_field", "lastUploadCount"))
             ),
@@ -266,6 +308,10 @@ class Settings:
             missing_fields.append("api.auth.url or api.base_url + api.auth.path")
         if not self.data_url and not (self.base_url and self.data_path_template):
             missing_fields.append("api.data.url or api.base_url + api.data.path_template")
+        if self.data_response_format not in {"csv", "json"}:
+            missing_fields.append("api.data.response_format must be 'csv' or 'json'")
+        if self.data_response_format == "csv" and len(self.data_csv_delimiter) != 1:
+            missing_fields.append("api.data.csv_delimiter must be a single character")
         if self.control_enabled and not self.control_url and not (
             self.base_url and self.control_path_template
         ):
@@ -304,3 +350,15 @@ def _resolve_url(direct_url: str, base_url: str, path: str) -> str:
 
 def _normalize_base_url(base_url: str) -> str:
     return base_url if base_url.endswith("/") else f"{base_url}/"
+
+
+def _default_file_extension(response_format: str) -> str:
+    if response_format == "json":
+        return "json"
+    return "csv"
+
+
+def _default_accept_header(response_format: str) -> str:
+    if response_format == "json":
+        return "application/json"
+    return "text/csv"

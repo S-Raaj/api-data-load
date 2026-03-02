@@ -135,7 +135,11 @@ class ApiClient:
         business_date: str,
         output_file: Path,
     ) -> None:
-        headers = {self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()}
+        headers = {
+            self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
+        }
+        if self.settings.data_accept_header:
+            headers["Accept"] = self.settings.data_accept_header
         data_url, params = self.settings.build_data_request(table_name, business_date)
         response = self._request(
             method=self.settings.data_method,
@@ -148,22 +152,18 @@ class ApiClient:
         )
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        bytes_written = 0
-        with output_file.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    handle.write(chunk)
-                    bytes_written += len(chunk)
+        bytes_written = self._write_downloaded_content(response, output_file)
 
         content_type = response.headers.get("Content-Type", "")
         LOGGER.info(
-            "Download CSV response",
+            "Download data response",
             extra={
                 "context": {
                     "table": table_name,
                     "url": data_url,
                     "status_code": response.status_code,
                     "content_type": content_type,
+                    "response_format": self.settings.data_response_format,
                     "bytes_written": bytes_written,
                     "output_file": str(output_file),
                 }
@@ -175,13 +175,32 @@ class ApiClient:
                 f"status={response.status_code}, content_type={content_type or 'unknown'}"
             )
 
+    def _write_downloaded_content(self, response: requests.Response, output_file: Path) -> int:
+        if self.settings.data_response_format == "json":
+            payload = response.json()
+            serialized = json.dumps(payload, indent=2)
+            output_file.write_text(serialized, encoding="utf-8")
+            return len(serialized.encode("utf-8"))
+
+        bytes_written = 0
+        with output_file.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    handle.write(chunk)
+                    bytes_written += len(chunk)
+        return bytes_written
+
     def _fetch_control_count_with_token(
         self,
         token: str,
         table_name: str,
         business_date: str,
     ) -> int:
-        headers = {self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()}
+        headers = {
+            self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
+        }
+        if self.settings.control_accept_header:
+            headers["Accept"] = self.settings.control_accept_header
         control_url, params = self.settings.build_control_request(table_name, business_date)
         response = self._request(
             method=self.settings.control_method,
@@ -276,9 +295,19 @@ class ApiClient:
             context["table"] = table_name
         LOGGER.info("Calling API", extra={"context": context})
 
-    def count_downloaded_rows(self, output_file: Path) -> int:
+    def count_downloaded_records(self, output_file: Path) -> int:
+        if self.settings.data_response_format == "json":
+            payload = json.loads(output_file.read_text(encoding="utf-8"))
+            if isinstance(payload, list):
+                return len(payload)
+            if isinstance(payload, dict):
+                return 1
+            raise RuntimeError("Unsupported JSON download payload for record counting.")
+
         with output_file.open("r", encoding="utf-8", newline="") as handle:
-            total_rows = sum(1 for row in reader(handle) if row)
+            total_rows = sum(
+                1 for row in reader(handle, delimiter=self.settings.data_csv_delimiter) if row
+            )
         if self.settings.control_exclude_header and total_rows > 0:
             return total_rows - 1
         return total_rows

@@ -13,11 +13,16 @@ api:
   data:
     method: "GET"
     path_template: "/data/table={table_name}/asofdate={asofdate}"
+    response_format: "csv"
+    file_extension: "csv"
+    csv_delimiter: "|"
+    accept_header: "text/csv"
   control:
     enabled: false
     method: "GET"
     path_template: "/data/table={table_name}?asofdate={asofdate}"
     response_format: "json"
+    accept_header: "application/json"
     count_field: "lastUploadCount"
     date_field: "lastUploadDate"
     selection_strategy: "latest"
