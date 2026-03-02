@@ -1,0 +1,44 @@
+api:
+  base_url: "https://internal.company.com"
+  verify_ssl: false
+  auth:
+    path: "/auth/token"
+    method: "GET"
+    client_id: "your-client-id"
+    secret: "your-secret"
+    client_id_param: "client_id"
+    secret_header: "X-API-SECRET"
+  data:
+    method: "GET"
+    path_template: "/data/table={table_name}/asofdate={asofdate}"
+  control:
+    enabled: false
+    method: "GET"
+    path_template: "/data/table={table_name}?asofdate={asofdate}"
+    response_format: "json"
+    count_field: "lastUploadCount"
+    date_field: "lastUploadDate"
+    selection_strategy: "latest"
+    strict: true
+    exclude_header: true
+token:
+  field: "token"
+  expiry_field: "expiringAt"
+  header: "Authorization"
+  prefix: "Bearer"
+  refresh_buffer_minutes: 5
+retry:
+  max_retries: 3
+  backoff_seconds: 2.0
+  retryable_status_codes: [429, 500, 502, 503, 504]
+orchestrator:
+  download_dir: "./downloads"
+  log_dir: "./logs"
+  metrics_dir: "./metrics"
+  cleanup_local_files: true
+  fail_fast: false
+hdfs:
+  target_dir: "/data/raw/internal_api"
+tables:
+  - customers
+  - orders

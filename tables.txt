@@ -1,0 +1,4 @@
+# one table name per line
+customers
+orders
+invoices
