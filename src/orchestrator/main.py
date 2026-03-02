@@ -54,10 +54,21 @@ def load_tables(args: argparse.Namespace, settings: Settings) -> list[str]:
 
 def resolve_business_date(settings: Settings, raw_value: str | None) -> str:
     if raw_value:
+        normalized_input = raw_value.strip()
+        if _matches_date_format(normalized_input, "%Y%m%d"):
+            parsed_date = datetime.strptime(normalized_input, "%Y%m%d")
+            return _format_asofdate(settings, parsed_date)
+
         for input_format in _candidate_asofdate_input_formats(settings):
+            if input_format == "%Y%m%d":
+                continue
             try:
-                parsed_date = datetime.strptime(raw_value, input_format)
-                return _format_asofdate(settings, parsed_date)
+                datetime.strptime(normalized_input, input_format)
+                return (
+                    normalized_input.upper()
+                    if settings.asofdate_uppercase
+                    else normalized_input
+                )
             except ValueError:
                 continue
         raise ValueError(
@@ -84,6 +95,14 @@ def _candidate_asofdate_input_formats(settings: Settings) -> list[str]:
 def _format_asofdate(settings: Settings, value: datetime) -> str:
     formatted = value.strftime(settings.asofdate_format)
     return formatted.upper() if settings.asofdate_uppercase else formatted
+
+
+def _matches_date_format(value: str, date_format: str) -> bool:
+    try:
+        datetime.strptime(value, date_format)
+        return True
+    except ValueError:
+        return False
 
 
 def cleanup_run_dir(run_dir: Path) -> None:
