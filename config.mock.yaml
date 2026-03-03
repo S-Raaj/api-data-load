@@ -23,9 +23,12 @@ api:
     path_template: "/data/table={table_name}?asofdate={asofdate}"
     response_format: "json"
     accept_header: "application/json"
+    payload_path: ""
     count_field: "lastUploadCount"
     date_field: "lastUploadDate"
     selection_strategy: "latest"
+    text_count_pattern: ""
+    text_date_pattern: ""
     strict: true
     exclude_header: true
 

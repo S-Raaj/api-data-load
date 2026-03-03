@@ -48,14 +48,22 @@ api:
   data:
     method: "GET"
     path_template: "/data/table={table_name}/asofdate={asofdate}"
+    response_format: "csv"
+    file_extension: "csv"
+    csv_delimiter: "|"
+    accept_header: "text/csv"
   control:
     enabled: false
     method: "GET"
     path_template: "/data/table={table_name}?asofdate={asofdate}"
     response_format: "json"
+    accept_header: "application/json"
+    payload_path: ""
     count_field: "lastUploadCount"
     date_field: "lastUploadDate"
     selection_strategy: "latest"
+    text_count_pattern: ""
+    text_date_pattern: ""
     strict: true
     exclude_header: true
 token:
@@ -83,6 +91,7 @@ tables:
 ```
 
 A test/demo version is also available at [config.mock.yaml](/Users/raaj/Documents/New%20project/config.mock.yaml).
+An additional control-pattern sample is available at [config.control-patterns.mock.yaml](/Users/raaj/Documents/New%20project/config.control-patterns.mock.yaml).
 
 Run with YAML:
 
@@ -98,8 +107,15 @@ PYTHONPATH=src python -m orchestrator.main --config config.mock.yaml --asofdate 
 
 The `data.path_template` can include `{table_name}`, `{business_date}`, and `{asofdate}` placeholders.
 `api.asofdate_format: "%d-%b-%Y"` plus `api.asofdate_uppercase: true` produces values like `18-AUG-2025`.
+Set `api.data.response_format` to `csv` or `json` to control how the main data API response is written locally.
+For CSV downloads, set `api.data.csv_delimiter: "|"` for pipe-delimited files.
+Set `api.data.accept_header: "text/csv"` to match curl requests like `-H "Accept: text/csv"`.
 Set `api.verify_ssl: false` to match `curl -k` for internal certificates.
 If `api.control.enabled: true`, the orchestrator calls the optional control API with the same bearer token and validates the downloaded row count.
+Control extraction is configurable for both JSON and text responses:
+- `payload_path` for nested JSON
+- `count_field` and `date_field` for the fields you want
+- `text_count_pattern` and `text_date_pattern` for regex-based text extraction
 The `tables` list, local `orchestrator.download_dir`, and `hdfs.target_dir` can all be defined in the config file and used without CLI table input.
 Set `hdfs.enabled: false` to skip HDFS upload entirely.
 
@@ -116,13 +132,21 @@ export API_ASOFDATE_FORMAT="%d-%b-%Y"
 export API_ASOFDATE_UPPERCASE="true"
 export API_AUTH_PATH="/auth/token"
 export API_DATA_PATH_TEMPLATE="/data/table={table_name}/asofdate={asofdate}"
+export API_DATA_RESPONSE_FORMAT="csv"
+export API_DATA_FILE_EXTENSION="csv"
+export API_DATA_CSV_DELIMITER="|"
+export API_DATA_ACCEPT_HEADER="text/csv"
 export API_CONTROL_ENABLED="false"
 export API_CONTROL_PATH_TEMPLATE="/data/table={table_name}?asofdate={asofdate}"
 export API_CONTROL_METHOD="GET"
 export API_CONTROL_RESPONSE_FORMAT="json"
+export API_CONTROL_ACCEPT_HEADER="application/json"
+export API_CONTROL_PAYLOAD_PATH=""
 export API_CONTROL_COUNT_FIELD="lastUploadCount"
 export API_CONTROL_DATE_FIELD="lastUploadDate"
 export API_CONTROL_SELECTION_STRATEGY="latest"
+export API_CONTROL_TEXT_COUNT_PATTERN=""
+export API_CONTROL_TEXT_DATE_PATTERN=""
 export API_CONTROL_STRICT="true"
 export API_CONTROL_EXCLUDE_HEADER="true"
 export API_CLIENT_ID="your-client-id"
@@ -217,7 +241,29 @@ hdfs:
 ```
 
 With the sample config above, `--asofdate 20260301` is rendered to the API as `01-MAR-2026`.
-You can also pass the API-formatted value directly, for example `--asofdate 18-AUG-2025`.
+You can also pass the API-formatted value directly, for example `--asofdate 18-AUG-2025`, and it will be sent as-is to the API.
+
+Examples:
+
+```yaml
+api:
+  data:
+    response_format: "csv"
+    file_extension: "csv"
+    csv_delimiter: "|"
+    accept_header: "text/csv"
+```
+
+```yaml
+api:
+  data:
+    response_format: "json"
+    file_extension: "json"
+```
+
+For JSON downloads, the framework stores pretty-printed JSON and control validation counts:
+- list payloads as record count = list length
+- object payloads as record count = 1
 
 Optional control API example matching your curl:
 
@@ -246,6 +292,45 @@ Example control response supported now:
 ```
 
 With `selection_strategy: "latest"`, the orchestrator picks the most recent `lastUploadDate` record and compares its `lastUploadCount` to the downloaded CSV row count.
+
+Examples for control extraction:
+
+JSON list response:
+
+```yaml
+api:
+  control:
+    response_format: "json"
+    payload_path: ""
+    count_field: "lastUploadCount"
+    date_field: "lastUploadDate"
+    selection_strategy: "latest"
+```
+
+Nested JSON response:
+
+```yaml
+api:
+  control:
+    response_format: "json"
+    payload_path: "data.history"
+    count_field: "metrics.lastUploadCount"
+    date_field: "audit.lastUploadDate"
+    selection_strategy: "latest"
+```
+
+Text response:
+
+```yaml
+api:
+  control:
+    response_format: "text"
+    text_count_pattern: "lastUploadCount=(\\d+)"
+    text_date_pattern: "lastUploadDate=([^,\\n]+)"
+    count_field: "lastUploadCount"
+    date_field: "lastUploadDate"
+    selection_strategy: "latest"
+```
 
 To run for a specific business date instead of today:
 

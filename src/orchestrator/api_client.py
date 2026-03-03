@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from csv import reader
 from dataclasses import dataclass
@@ -332,22 +333,20 @@ class ApiClient:
 
     def _parse_control_count(self, response: requests.Response) -> int:
         if self.settings.control_response_format == "text":
-            try:
-                return int(response.text.strip())
-            except ValueError as exc:
-                raise RuntimeError(
-                    f"Control response was not an integer: {response.text[:200]}"
-                ) from exc
+            return self._parse_control_count_from_text(response.text)
 
         try:
             payload: Any = response.json()
         except json.JSONDecodeError as exc:
             raise RuntimeError("Control response was not valid JSON.") from exc
 
+        if self.settings.control_payload_path:
+            payload = self._extract_by_path(payload, self.settings.control_payload_path)
+
         if isinstance(payload, int):
             return payload
         if isinstance(payload, dict):
-            count_value = payload.get(self.settings.control_count_field)
+            count_value = self._extract_by_path(payload, self.settings.control_count_field)
             if count_value is None:
                 raise RuntimeError(
                     f"Control field '{self.settings.control_count_field}' not found in response."
@@ -363,7 +362,9 @@ class ApiClient:
             if not payload:
                 raise RuntimeError("Control response list was empty.")
             selected_record = self._select_control_record(payload)
-            count_value = selected_record.get(self.settings.control_count_field)
+            count_value = self._extract_by_path(
+                selected_record, self.settings.control_count_field
+            )
             if count_value is None:
                 raise RuntimeError(
                     f"Control field '{self.settings.control_count_field}' not found in selected control record."
@@ -388,7 +389,7 @@ class ApiClient:
         if self.settings.control_selection_strategy == "latest":
             dated_records: list[tuple[datetime, dict[str, Any]]] = []
             for record in dict_records:
-                raw_date = record.get(self.settings.control_date_field)
+                raw_date = self._extract_by_path(record, self.settings.control_date_field)
                 parsed_date = self._parse_timestamp(raw_date)
                 if parsed_date is not None:
                     dated_records.append((parsed_date, record))
@@ -400,6 +401,64 @@ class ApiClient:
         raise RuntimeError(
             f"Unsupported control selection strategy: {self.settings.control_selection_strategy}"
         )
+
+    def _parse_control_count_from_text(self, raw_text: str) -> int:
+        count_pattern = self.settings.control_text_count_pattern
+        date_pattern = self.settings.control_text_date_pattern
+
+        if not count_pattern:
+            try:
+                return int(raw_text.strip())
+            except ValueError as exc:
+                raise RuntimeError(
+                    "Control text response requires API_CONTROL_TEXT_COUNT_PATTERN "
+                    "or must be a plain integer."
+                ) from exc
+
+        if date_pattern:
+            counts = list(re.finditer(count_pattern, raw_text, re.MULTILINE))
+            dates = list(re.finditer(date_pattern, raw_text, re.MULTILINE))
+            if not counts:
+                raise RuntimeError("Control text count pattern did not match response.")
+            if not dates:
+                raise RuntimeError("Control text date pattern did not match response.")
+
+            record_count = min(len(counts), len(dates))
+            records: list[dict[str, Any]] = []
+            for index in range(record_count):
+                records.append(
+                    {
+                        self.settings.control_count_field: counts[index].group(1),
+                        self.settings.control_date_field: dates[index].group(1),
+                    }
+                )
+            selected_record = self._select_control_record(records)
+            count_value = self._extract_by_path(
+                selected_record, self.settings.control_count_field
+            )
+            return int(count_value)
+
+        match = re.search(count_pattern, raw_text, re.MULTILINE)
+        if not match:
+            raise RuntimeError("Control text count pattern did not match response.")
+        return int(match.group(1))
+
+    def _extract_by_path(self, payload: Any, path: str) -> Any:
+        if not path:
+            return payload
+
+        current = payload
+        for part in path.split("."):
+            if isinstance(current, dict):
+                current = current.get(part)
+            elif isinstance(current, list) and part.isdigit():
+                index = int(part)
+                current = current[index] if 0 <= index < len(current) else None
+            else:
+                return None
+            if current is None:
+                return None
+        return current
 
     def _resolve_expiration(self, payload: dict[str, Any]) -> datetime:
         raw_expiration = payload.get(self.settings.token_expiry_field)

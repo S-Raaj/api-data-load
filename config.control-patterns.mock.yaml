@@ -6,8 +6,8 @@ api:
   auth:
     path: "/auth/token"
     method: "GET"
-    client_id: "your-client-id"
-    secret: "your-secret"
+    client_id: "demo-client-id"
+    secret: "demo-secret"
     client_id_param: "client_id"
     secret_header: "X-API-SECRET"
   data:
@@ -18,38 +18,64 @@ api:
     csv_delimiter: "|"
     accept_header: "text/csv"
   control:
-    enabled: false
+    enabled: true
     method: "GET"
     path_template: "/data/table={table_name}?asofdate={asofdate}"
+
+    # Option 1: flat JSON response
     response_format: "json"
     accept_header: "application/json"
     payload_path: ""
     count_field: "lastUploadCount"
     date_field: "lastUploadDate"
     selection_strategy: "latest"
+
+    # Option 2: nested JSON response
+    # response_format: "json"
+    # accept_header: "application/json"
+    # payload_path: "data.history"
+    # count_field: "metrics.lastUploadCount"
+    # date_field: "audit.lastUploadDate"
+    # selection_strategy: "latest"
+
+    # Option 3: text response with regex extraction
+    # response_format: "text"
+    # accept_header: "text/plain"
+    # text_count_pattern: "lastUploadCount=(\\d+)"
+    # text_date_pattern: "lastUploadDate=([^,\\n]+)"
+    # count_field: "lastUploadCount"
+    # date_field: "lastUploadDate"
+    # selection_strategy: "latest"
+
     text_count_pattern: ""
     text_date_pattern: ""
     strict: true
     exclude_header: true
+
 token:
   field: "token"
   expiry_field: "expiringAt"
   header: "Authorization"
   prefix: "Bearer"
   refresh_buffer_minutes: 5
+
 retry:
   max_retries: 3
   backoff_seconds: 2.0
   retryable_status_codes: [429, 500, 502, 503, 504]
+
 orchestrator:
   download_dir: "./downloads"
   log_dir: "./logs"
   metrics_dir: "./metrics"
   cleanup_local_files: true
   fail_fast: false
+
 hdfs:
-  enabled: true
+  enabled: false
   target_dir: "/data/raw/internal_api"
+
 tables:
   - customers
   - orders
+  - invoices

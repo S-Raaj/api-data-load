@@ -34,9 +34,12 @@ class Settings:
     control_method: str = "GET"
     control_response_format: str = "json"
     control_accept_header: str = ""
+    control_payload_path: str = ""
     control_count_field: str = "lastUploadCount"
     control_date_field: str = "lastUploadDate"
     control_selection_strategy: str = "latest"
+    control_text_count_pattern: str = ""
+    control_text_date_pattern: str = ""
     control_strict: bool = True
     control_exclude_header: bool = True
     verify_ssl: bool = True
@@ -163,6 +166,9 @@ class Settings:
                     )
                 ),
             ),
+            control_payload_path=os.getenv(
+                "API_CONTROL_PAYLOAD_PATH", str(control_config.get("payload_path", ""))
+            ),
             control_count_field=os.getenv(
                 "API_CONTROL_COUNT_FIELD", str(control_config.get("count_field", "lastUploadCount"))
             ),
@@ -172,6 +178,14 @@ class Settings:
             control_selection_strategy=os.getenv(
                 "API_CONTROL_SELECTION_STRATEGY",
                 str(control_config.get("selection_strategy", "latest")),
+            ),
+            control_text_count_pattern=os.getenv(
+                "API_CONTROL_TEXT_COUNT_PATTERN",
+                str(control_config.get("text_count_pattern", "")),
+            ),
+            control_text_date_pattern=os.getenv(
+                "API_CONTROL_TEXT_DATE_PATTERN",
+                str(control_config.get("text_date_pattern", "")),
             ),
             control_strict=_read_bool(
                 "API_CONTROL_STRICT", bool(control_config.get("strict", True))
