@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin
 
 
@@ -28,14 +29,17 @@ class Settings:
     data_file_extension: str = "csv"
     data_csv_delimiter: str = ","
     data_accept_header: str = ""
+    data_headers: dict[str, str] | None = None
     control_url: str = ""
     control_path_template: str = ""
     control_enabled: bool = False
     control_method: str = "GET"
     control_response_format: str = "json"
     control_accept_header: str = ""
+    control_headers: dict[str, str] | None = None
     control_file_extension: str = "json"
     control_save_response: bool = False
+    control_debug_save_raw_response: bool = False
     control_validation_enabled: bool = True
     control_payload_path: str = ""
     control_count_field: str = "lastUploadCount"
@@ -144,6 +148,7 @@ class Settings:
                     )
                 ),
             ),
+            data_headers=_read_headers(data_config.get("headers", {})),
             control_url=control_url,
             control_path_template=os.getenv(
                 "API_CONTROL_PATH_TEMPLATE", str(control_config.get("path_template", ""))
@@ -169,6 +174,7 @@ class Settings:
                     )
                 ),
             ),
+            control_headers=_read_headers(control_config.get("headers", {})),
             control_file_extension=os.getenv(
                 "API_CONTROL_FILE_EXTENSION",
                 str(control_config.get("file_extension", "")),
@@ -179,6 +185,10 @@ class Settings:
             control_save_response=_read_bool(
                 "API_CONTROL_SAVE_RESPONSE",
                 bool(control_config.get("save_response", False)),
+            ),
+            control_debug_save_raw_response=_read_bool(
+                "API_CONTROL_DEBUG_SAVE_RAW_RESPONSE",
+                bool(control_config.get("debug_save_raw_response", False)),
             ),
             control_validation_enabled=_read_bool(
                 "API_CONTROL_VALIDATION_ENABLED",
@@ -370,6 +380,14 @@ def _load_yaml_config(config_path: str) -> dict:
     if not isinstance(payload, dict):
         raise RuntimeError(f"YAML config must be a mapping at the top level: {config_file}")
     return payload
+
+
+def _read_headers(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise RuntimeError("Configured headers must be a key/value mapping.")
+    return {str(key): str(header_value) for key, header_value in value.items()}
 
 
 def _resolve_url(direct_url: str, base_url: str, path: str) -> str:

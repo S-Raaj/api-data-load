@@ -147,11 +147,10 @@ class ApiClient:
         business_date: str,
         output_file: Path,
     ) -> None:
-        headers = {
-            self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
-        }
+        headers = self._build_auth_headers(token)
         if self.settings.data_accept_header:
             headers["Accept"] = self.settings.data_accept_header
+        headers.update(self.settings.data_headers or {})
         data_url, params = self.settings.build_data_request(table_name, business_date)
         response = self._request(
             method=self.settings.data_method,
@@ -208,11 +207,10 @@ class ApiClient:
         table_name: str,
         business_date: str,
     ) -> ControlResponseDetails:
-        headers = {
-            self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
-        }
+        headers = self._build_auth_headers(token)
         if self.settings.control_accept_header:
             headers["Accept"] = self.settings.control_accept_header
+        headers.update(self.settings.control_headers or {})
         control_url, params = self.settings.build_control_request(table_name, business_date)
         response = self._request(
             method=self.settings.control_method,
@@ -236,9 +234,27 @@ class ApiClient:
                     "response_format": self.settings.control_response_format,
                     "body_bytes": body_bytes,
                     "body_preview": body_text[:500],
+                    "response_headers": dict(response.headers),
                 }
             },
         )
+        if self.settings.control_debug_save_raw_response:
+            debug_file = self._write_control_debug_response(
+                table_name=table_name,
+                business_date=business_date,
+                response_format=self.settings.control_response_format,
+                response_body=body_text,
+            )
+            LOGGER.info(
+                "Control raw response saved",
+                extra={
+                    "context": {
+                        "table": table_name,
+                        "url": control_url,
+                        "debug_file": str(debug_file),
+                    }
+                },
+            )
         return self._parse_control_details(
             response=response,
             response_body=body_text,
@@ -266,6 +282,7 @@ class ApiClient:
                     stream=stream,
                     table_name=table_name,
                     attempt=attempt,
+                    headers=headers,
                 )
                 response = self.session.request(
                     method=method,
@@ -315,6 +332,7 @@ class ApiClient:
         stream: bool,
         table_name: str | None,
         attempt: int,
+        headers: dict[str, str],
     ) -> None:
         context: dict[str, Any] = {
             "request_name": request_name,
@@ -323,10 +341,25 @@ class ApiClient:
             "params": params,
             "stream": stream,
             "attempt": attempt,
+            "headers": self._sanitize_headers(headers),
         }
         if table_name:
             context["table"] = table_name
         LOGGER.info("Calling API", extra={"context": context})
+
+    def _build_auth_headers(self, token: str) -> dict[str, str]:
+        return {
+            self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
+        }
+
+    def _sanitize_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        sanitized: dict[str, str] = {}
+        for key, value in headers.items():
+            if key.lower() in {"authorization", "x-api-secret", "proxy-authorization"}:
+                sanitized[key] = "<redacted>"
+            else:
+                sanitized[key] = value
+        return sanitized
 
     def count_downloaded_records(self, output_file: Path) -> int:
         if self.settings.data_response_format == "json":
@@ -357,6 +390,21 @@ class ApiClient:
             return
 
         output_file.write_text(str(details.raw_payload), encoding="utf-8")
+
+    def _write_control_debug_response(
+        self,
+        table_name: str,
+        business_date: str,
+        response_format: str,
+        response_body: str,
+    ) -> Path:
+        debug_dir = self.settings.log_dir / "control_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        extension = "txt" if response_format == "text" else "json"
+        debug_file = debug_dir / f"{table_name}_{business_date}_{timestamp}.{extension}"
+        debug_file.write_text(response_body, encoding="utf-8")
+        return debug_file
 
     def _retry_sleep(self, attempt: int, url: str, reason: str) -> None:
         delay = self.settings.retry_backoff_seconds * (2 ** (attempt - 1))
