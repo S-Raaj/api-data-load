@@ -34,6 +34,9 @@ class Settings:
     control_method: str = "GET"
     control_response_format: str = "json"
     control_accept_header: str = ""
+    control_file_extension: str = "json"
+    control_save_response: bool = False
+    control_validation_enabled: bool = True
     control_payload_path: str = ""
     control_count_field: str = "lastUploadCount"
     control_date_field: str = "lastUploadDate"
@@ -165,6 +168,21 @@ class Settings:
                         ),
                     )
                 ),
+            ),
+            control_file_extension=os.getenv(
+                "API_CONTROL_FILE_EXTENSION",
+                str(control_config.get("file_extension", "")),
+            ).lower()
+            or _default_file_extension(
+                str(control_config.get("response_format", "json")).lower()
+            ),
+            control_save_response=_read_bool(
+                "API_CONTROL_SAVE_RESPONSE",
+                bool(control_config.get("save_response", False)),
+            ),
+            control_validation_enabled=_read_bool(
+                "API_CONTROL_VALIDATION_ENABLED",
+                bool(control_config.get("validation_enabled", True)),
             ),
             control_payload_path=os.getenv(
                 "API_CONTROL_PAYLOAD_PATH", str(control_config.get("payload_path", ""))

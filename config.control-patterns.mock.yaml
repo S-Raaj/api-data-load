@@ -21,30 +21,33 @@ api:
     enabled: true
     method: "GET"
     path_template: "/data/table={table_name}?asofdate={asofdate}"
+    file_extension: "json"
+    save_response: true
+    validation_enabled: true
 
     # Option 1: flat JSON response
     response_format: "json"
     accept_header: "application/json"
     payload_path: ""
-    count_field: "lastUploadCount"
-    date_field: "lastUploadDate"
+    count_field: "totalRecordCount"
+    date_field: "lastUpdateTime"
     selection_strategy: "latest"
 
     # Option 2: nested JSON response
     # response_format: "json"
     # accept_header: "application/json"
     # payload_path: "data.history"
-    # count_field: "metrics.lastUploadCount"
-    # date_field: "audit.lastUploadDate"
+    # count_field: "metrics.totalRecordCount"
+    # date_field: "audit.lastUpdateTime"
     # selection_strategy: "latest"
 
     # Option 3: text response with regex extraction
     # response_format: "text"
     # accept_header: "text/plain"
-    # text_count_pattern: "lastUploadCount=(\\d+)"
-    # text_date_pattern: "lastUploadDate=([^,\\n]+)"
-    # count_field: "lastUploadCount"
-    # date_field: "lastUploadDate"
+    # text_count_pattern: "totalRecordCount=(\\d+)"
+    # text_date_pattern: "lastUpdateTime=([^,\\n]+)"
+    # count_field: "totalRecordCount"
+    # date_field: "lastUpdateTime"
     # selection_strategy: "latest"
 
     text_count_pattern: ""

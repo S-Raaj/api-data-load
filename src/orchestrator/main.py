@@ -144,7 +144,7 @@ def main() -> int:
         failures: list[dict[str, str]] = []
 
         for table in tables:
-            file_path = run_dir / f"{table}_{business_date}.csv"
+            file_path = run_dir / f"{table}_{business_date}.{settings.data_file_extension}"
             LOGGER.info(
                 "Processing table",
                 extra={"context": {"table": table, "business_date": business_date}},
@@ -155,36 +155,58 @@ def main() -> int:
                 metrics.increment("downloads_success")
 
                 if settings.control_enabled:
-                    with metrics.track("validate_control_count", table=table):
-                        expected_rows = client.fetch_control_count(table, business_date)
-                        actual_rows = client.count_downloaded_rows(file_path)
-                        metrics.record_attribute(
-                            f"control_count_{table}",
-                            {
-                                "expected_rows": expected_rows,
-                                "actual_rows": actual_rows,
-                            },
+                    with metrics.track("fetch_control_response", table=table):
+                        control_details = client.fetch_control_details(table, business_date)
+                    metrics.record_attribute(
+                        f"control_response_{table}",
+                        {
+                            "record_count": control_details.record_count,
+                            "record_date": control_details.record_date,
+                        },
+                    )
+
+                    if settings.control_save_response:
+                        control_file_path = (
+                            run_dir
+                            / f"{table}_{business_date}_control.{settings.control_file_extension}"
                         )
-                        if expected_rows != actual_rows:
-                            metrics.increment("control_validation_mismatch")
-                            message = (
-                                f"Control count mismatch for {table}: "
-                                f"expected {expected_rows}, actual {actual_rows}"
-                            )
-                            if settings.control_strict:
-                                raise RuntimeError(message)
-                            LOGGER.warning(
-                                "Control count mismatch",
-                                extra={
-                                    "context": {
-                                        "table": table,
-                                        "expected_rows": expected_rows,
-                                        "actual_rows": actual_rows,
-                                    }
+                        with metrics.track("save_control_response", table=table):
+                            client.write_control_response(control_details, control_file_path)
+                        metrics.increment("control_response_saved")
+
+                    if settings.control_validation_enabled:
+                        with metrics.track("validate_control_count", table=table):
+                            expected_rows = control_details.record_count
+                            actual_rows = client.count_downloaded_records(file_path)
+                            metrics.record_attribute(
+                                f"control_count_{table}",
+                                {
+                                    "expected_rows": expected_rows,
+                                    "actual_rows": actual_rows,
                                 },
                             )
-                        else:
-                            metrics.increment("control_validation_success")
+                            if expected_rows != actual_rows:
+                                metrics.increment("control_validation_mismatch")
+                                message = (
+                                    f"Control count mismatch for {table}: "
+                                    f"expected {expected_rows}, actual {actual_rows}"
+                                )
+                                if settings.control_strict:
+                                    raise RuntimeError(message)
+                                LOGGER.warning(
+                                    "Control count mismatch",
+                                    extra={
+                                        "context": {
+                                            "table": table,
+                                            "expected_rows": expected_rows,
+                                            "actual_rows": actual_rows,
+                                        }
+                                    },
+                                )
+                            else:
+                                metrics.increment("control_validation_success")
+                    else:
+                        metrics.increment("control_validation_skipped")
 
                 if settings.hdfs_enabled:
                     with metrics.track("upload_hdfs", table=table):

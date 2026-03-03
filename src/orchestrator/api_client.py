@@ -34,6 +34,14 @@ class TokenState:
     expires_at: datetime
 
 
+@dataclass
+class ControlResponseDetails:
+    record_count: int
+    record_date: str | None
+    raw_payload: Any
+    response_format: str
+
+
 class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -67,9 +75,12 @@ class ApiClient:
             self._download_csv_with_token(token, table_name, business_date, output_file)
 
     def fetch_control_count(self, table_name: str, business_date: str) -> int:
+        return self.fetch_control_details(table_name, business_date).record_count
+
+    def fetch_control_details(self, table_name: str, business_date: str) -> ControlResponseDetails:
         token = self.get_valid_token()
         try:
-            return self._fetch_control_count_with_token(token, table_name, business_date)
+            return self._fetch_control_details_with_token(token, table_name, business_date)
         except UnauthorizedApiError:
             LOGGER.info(
                 "Refreshing token after unauthorized control response",
@@ -77,7 +88,7 @@ class ApiClient:
             )
             self._stats["api_401_refresh_retries"] += 1
             token = self.get_valid_token(force_refresh=True)
-            return self._fetch_control_count_with_token(token, table_name, business_date)
+            return self._fetch_control_details_with_token(token, table_name, business_date)
 
     def get_stats(self) -> dict[str, int]:
         return dict(self._stats)
@@ -191,12 +202,12 @@ class ApiClient:
                     bytes_written += len(chunk)
         return bytes_written
 
-    def _fetch_control_count_with_token(
+    def _fetch_control_details_with_token(
         self,
         token: str,
         table_name: str,
         business_date: str,
-    ) -> int:
+    ) -> ControlResponseDetails:
         headers = {
             self.settings.token_header: f"{self.settings.token_prefix} {token}".strip()
         }
@@ -211,7 +222,7 @@ class ApiClient:
             request_name="control",
             table_name=table_name,
         )
-        return self._parse_control_count(response)
+        return self._parse_control_details(response)
 
     def _request(
         self,
@@ -313,6 +324,19 @@ class ApiClient:
             return total_rows - 1
         return total_rows
 
+    def write_control_response(
+        self,
+        details: ControlResponseDetails,
+        output_file: Path,
+    ) -> None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        if details.response_format == "json":
+            serialized = json.dumps(details.raw_payload, indent=2)
+            output_file.write_text(serialized, encoding="utf-8")
+            return
+
+        output_file.write_text(str(details.raw_payload), encoding="utf-8")
+
     def _retry_sleep(self, attempt: int, url: str, reason: str) -> None:
         delay = self.settings.retry_backoff_seconds * (2 ** (attempt - 1))
         jitter = random.uniform(0, delay * 0.2)
@@ -331,9 +355,15 @@ class ApiClient:
         )
         time.sleep(sleep_seconds)
 
-    def _parse_control_count(self, response: requests.Response) -> int:
+    def _parse_control_details(self, response: requests.Response) -> ControlResponseDetails:
         if self.settings.control_response_format == "text":
-            return self._parse_control_count_from_text(response.text)
+            count, record_date = self._parse_control_count_from_text(response.text)
+            return ControlResponseDetails(
+                record_count=count,
+                record_date=record_date,
+                raw_payload=response.text,
+                response_format="text",
+            )
 
         try:
             payload: Any = response.json()
@@ -344,7 +374,12 @@ class ApiClient:
             payload = self._extract_by_path(payload, self.settings.control_payload_path)
 
         if isinstance(payload, int):
-            return payload
+            return ControlResponseDetails(
+                record_count=payload,
+                record_date=None,
+                raw_payload=payload,
+                response_format="json",
+            )
         if isinstance(payload, dict):
             count_value = self._extract_by_path(payload, self.settings.control_count_field)
             if count_value is None:
@@ -352,11 +387,18 @@ class ApiClient:
                     f"Control field '{self.settings.control_count_field}' not found in response."
                 )
             try:
-                return int(count_value)
+                record_count = int(count_value)
             except (TypeError, ValueError) as exc:
                 raise RuntimeError(
                     f"Control field '{self.settings.control_count_field}' was not numeric."
                 ) from exc
+            record_date = self._extract_by_path(payload, self.settings.control_date_field)
+            return ControlResponseDetails(
+                record_count=record_count,
+                record_date=str(record_date) if record_date is not None else None,
+                raw_payload=payload,
+                response_format="json",
+            )
 
         if isinstance(payload, list):
             if not payload:
@@ -370,11 +412,20 @@ class ApiClient:
                     f"Control field '{self.settings.control_count_field}' not found in selected control record."
                 )
             try:
-                return int(count_value)
+                record_count = int(count_value)
             except (TypeError, ValueError) as exc:
                 raise RuntimeError(
                     f"Control field '{self.settings.control_count_field}' was not numeric."
                 ) from exc
+            record_date = self._extract_by_path(
+                selected_record, self.settings.control_date_field
+            )
+            return ControlResponseDetails(
+                record_count=record_count,
+                record_date=str(record_date) if record_date is not None else None,
+                raw_payload=payload,
+                response_format="json",
+            )
 
         raise RuntimeError("Unsupported control response payload.")
 
@@ -402,13 +453,13 @@ class ApiClient:
             f"Unsupported control selection strategy: {self.settings.control_selection_strategy}"
         )
 
-    def _parse_control_count_from_text(self, raw_text: str) -> int:
+    def _parse_control_count_from_text(self, raw_text: str) -> tuple[int, str | None]:
         count_pattern = self.settings.control_text_count_pattern
         date_pattern = self.settings.control_text_date_pattern
 
         if not count_pattern:
             try:
-                return int(raw_text.strip())
+                return int(raw_text.strip()), None
             except ValueError as exc:
                 raise RuntimeError(
                     "Control text response requires API_CONTROL_TEXT_COUNT_PATTERN "
@@ -436,12 +487,15 @@ class ApiClient:
             count_value = self._extract_by_path(
                 selected_record, self.settings.control_count_field
             )
-            return int(count_value)
+            record_date = self._extract_by_path(
+                selected_record, self.settings.control_date_field
+            )
+            return int(count_value), str(record_date) if record_date is not None else None
 
         match = re.search(count_pattern, raw_text, re.MULTILINE)
         if not match:
             raise RuntimeError("Control text count pattern did not match response.")
-        return int(match.group(1))
+        return int(match.group(1)), None
 
     def _extract_by_path(self, payload: Any, path: str) -> Any:
         if not path:
