@@ -222,7 +222,28 @@ class ApiClient:
             request_name="control",
             table_name=table_name,
         )
-        return self._parse_control_details(response)
+        body_text = response.text
+        content_type = response.headers.get("Content-Type", "")
+        body_bytes = len(body_text.encode("utf-8"))
+        LOGGER.info(
+            "Control response received",
+            extra={
+                "context": {
+                    "table": table_name,
+                    "url": control_url,
+                    "status_code": response.status_code,
+                    "content_type": content_type,
+                    "response_format": self.settings.control_response_format,
+                    "body_bytes": body_bytes,
+                    "body_preview": body_text[:500],
+                }
+            },
+        )
+        return self._parse_control_details(
+            response=response,
+            response_body=body_text,
+            control_url=control_url,
+        )
 
     def _request(
         self,
@@ -355,23 +376,42 @@ class ApiClient:
         )
         time.sleep(sleep_seconds)
 
-    def _parse_control_details(self, response: requests.Response) -> ControlResponseDetails:
+    def _parse_control_details(
+        self,
+        response: requests.Response,
+        response_body: str,
+        control_url: str,
+    ) -> ControlResponseDetails:
         if self.settings.control_response_format == "text":
-            count, record_date = self._parse_control_count_from_text(response.text)
+            count, record_date = self._parse_control_count_from_text(response_body)
             return ControlResponseDetails(
                 record_count=count,
                 record_date=record_date,
-                raw_payload=response.text,
+                raw_payload=response_body,
                 response_format="text",
             )
 
         try:
-            payload: Any = response.json()
+            payload: Any = json.loads(response_body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Control response was not valid JSON.") from exc
+            raise RuntimeError(
+                "Control response was not valid JSON. "
+                f"url={control_url}, content_type={response.headers.get('Content-Type', 'unknown')}, "
+                f"body_preview={response_body[:500]!r}"
+            ) from exc
 
         if self.settings.control_payload_path:
             payload = self._extract_by_path(payload, self.settings.control_payload_path)
+            LOGGER.info(
+                "Control payload extracted",
+                extra={
+                    "context": {
+                        "url": control_url,
+                        "payload_path": self.settings.control_payload_path,
+                        "payload_type": type(payload).__name__,
+                    }
+                },
+            )
 
         if isinstance(payload, int):
             return ControlResponseDetails(
@@ -393,6 +433,19 @@ class ApiClient:
                     f"Control field '{self.settings.control_count_field}' was not numeric."
                 ) from exc
             record_date = self._extract_by_path(payload, self.settings.control_date_field)
+            LOGGER.info(
+                "Control record extracted",
+                extra={
+                    "context": {
+                        "url": control_url,
+                        "record_source": "object",
+                        "count_field": self.settings.control_count_field,
+                        "date_field": self.settings.control_date_field,
+                        "record_count": record_count,
+                        "record_date": str(record_date) if record_date is not None else None,
+                    }
+                },
+            )
             return ControlResponseDetails(
                 record_count=record_count,
                 record_date=str(record_date) if record_date is not None else None,
@@ -402,7 +455,11 @@ class ApiClient:
 
         if isinstance(payload, list):
             if not payload:
-                raise RuntimeError("Control response list was empty.")
+                raise RuntimeError(
+                    "Control response list was empty. "
+                    f"url={control_url}, payload_path={self.settings.control_payload_path or '<root>'}, "
+                    f"body_preview={response_body[:500]!r}"
+                )
             selected_record = self._select_control_record(payload)
             count_value = self._extract_by_path(
                 selected_record, self.settings.control_count_field
@@ -420,6 +477,21 @@ class ApiClient:
             record_date = self._extract_by_path(
                 selected_record, self.settings.control_date_field
             )
+            LOGGER.info(
+                "Control record extracted",
+                extra={
+                    "context": {
+                        "url": control_url,
+                        "record_source": "list",
+                        "selection_strategy": self.settings.control_selection_strategy,
+                        "count_field": self.settings.control_count_field,
+                        "date_field": self.settings.control_date_field,
+                        "record_count": record_count,
+                        "record_date": str(record_date) if record_date is not None else None,
+                        "selected_record": selected_record,
+                    }
+                },
+            )
             return ControlResponseDetails(
                 record_count=record_count,
                 record_date=str(record_date) if record_date is not None else None,
@@ -427,7 +499,11 @@ class ApiClient:
                 response_format="json",
             )
 
-        raise RuntimeError("Unsupported control response payload.")
+        raise RuntimeError(
+            "Unsupported control response payload. "
+            f"url={control_url}, payload_type={type(payload).__name__}, "
+            f"payload_path={self.settings.control_payload_path or '<root>'}"
+        )
 
     def _select_control_record(self, payload: list[Any]) -> dict[str, Any]:
         dict_records = [item for item in payload if isinstance(item, dict)]
@@ -545,6 +621,10 @@ class ApiClient:
             candidate = raw_value.strip()
             if not candidate:
                 return None
+
+            # Normalize loose timestamp formats like "2025-01-25  T02:21:53".
+            candidate = re.sub(r"\s*T\s*", "T", candidate)
+            candidate = re.sub(r"\s+", " ", candidate)
 
             if "[" in candidate and candidate.endswith("]"):
                 candidate = candidate.split("[", 1)[0]
