@@ -24,6 +24,7 @@ class Settings:
     hdfs_enabled: bool = True
     base_url: str = ""
     auth_path: str = ""
+    auth_debug_log_token: bool = False
     data_path_template: str = ""
     data_response_format: str = "csv"
     data_file_extension: str = "csv"
@@ -121,6 +122,10 @@ class Settings:
             ),
             base_url=base_url,
             auth_path=auth_path,
+            auth_debug_log_token=_read_bool(
+                "API_AUTH_DEBUG_LOG_TOKEN",
+                bool(auth_config.get("debug_log_token", False)),
+            ),
             data_path_template=data_path_template,
             data_response_format=os.getenv(
                 "API_DATA_RESPONSE_FORMAT",

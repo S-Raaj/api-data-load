@@ -138,6 +138,20 @@ class ApiClient:
                 f"Token field '{self.settings.token_field}' not found in auth response."
             )
         expires_at = self._resolve_expiration(payload)
+        if self.settings.auth_debug_log_token:
+            LOGGER.info(
+                "Auth token received",
+                extra={
+                    "context": {
+                        "auth_url": self.settings.build_auth_url(),
+                        "response_keys": sorted(str(key) for key in payload.keys()),
+                        "token_field": self.settings.token_field,
+                        "token_preview": self._redact_token(str(token)),
+                        "token_length": len(str(token)),
+                        "expires_at": expires_at.isoformat(),
+                    }
+                },
+            )
         return str(token), expires_at
 
     def _download_csv_with_token(
@@ -360,6 +374,11 @@ class ApiClient:
             else:
                 sanitized[key] = value
         return sanitized
+
+    def _redact_token(self, token: str) -> str:
+        if len(token) <= 12:
+            return "<redacted>"
+        return f"{token[:8]}...{token[-4:]}"
 
     def count_downloaded_records(self, output_file: Path) -> int:
         if self.settings.data_response_format == "json":

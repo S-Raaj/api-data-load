@@ -10,6 +10,7 @@ api:
     secret: "your-secret"
     client_id_param: "client_id"
     secret_header: "X-API-SECRET"
+    debug_log_token: false
   data:
     method: "GET"
     path_template: "/data/table={table_name}/asofdate={asofdate}"
