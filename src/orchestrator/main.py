@@ -247,6 +247,7 @@ def main() -> int:
                     client.download_csv(table, business_date, file_path)
                 metrics.increment("downloads_success")
                 control_validation_succeeded = False
+                control_validation_enabled = False
                 control_details = None
 
                 if settings.control_enabled:
@@ -270,6 +271,7 @@ def main() -> int:
                         metrics.increment("control_response_saved")
 
                     if settings.control_validation_enabled:
+                        control_validation_enabled = True
                         with metrics.track("validate_control_count", table=table):
                             expected_rows = control_details.record_count
                             actual_rows = client.count_downloaded_records(file_path)
@@ -305,7 +307,14 @@ def main() -> int:
                         metrics.increment("control_validation_skipped")
 
                     if settings.control_metadata_file_enabled:
-                        if control_validation_succeeded and control_details is not None:
+                        should_create_control_file = (
+                            control_details is not None
+                            and (
+                                not control_validation_enabled
+                                or control_validation_succeeded
+                            )
+                        )
+                        if should_create_control_file:
                             control_metadata_path = (
                                 file_path.parent
                                 / f"{file_path.stem}.{settings.control_metadata_file_extension}"
