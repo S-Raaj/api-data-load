@@ -54,6 +54,13 @@ orchestrator:
 hdfs:
   enabled: true
   target_dir: "/data/raw/internal_api"
+control_file:
+  enabled: false
+  extension: "ctrl"
+  business_date_source: "asofdate"
+  business_date_format: "%Y%m%d"
+  business_date_format_label: "yyyyMMdd"
+  default_time_zone: "CST"
 tables:
   - customers
   - orders

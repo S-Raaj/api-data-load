@@ -50,6 +50,12 @@ class Settings:
     control_text_date_pattern: str = ""
     control_strict: bool = True
     control_exclude_header: bool = True
+    control_metadata_file_enabled: bool = False
+    control_metadata_file_extension: str = "ctrl"
+    control_metadata_business_date_source: str = "asofdate"
+    control_metadata_business_date_format: str = "%Y%m%d"
+    control_metadata_business_date_format_label: str = "yyyyMMdd"
+    control_metadata_default_timezone: str = ""
     verify_ssl: bool = True
     asofdate_format: str = "%Y%m%d"
     asofdate_uppercase: bool = False
@@ -83,6 +89,7 @@ class Settings:
         auth_config = api_config.get("auth", {})
         data_config = api_config.get("data", {})
         control_config = api_config.get("control", {})
+        control_file_config = file_config.get("control_file", {})
         token_config = file_config.get("token", {})
         retry_config = file_config.get("retry", {})
         orchestrator_config = file_config.get("orchestrator", {})
@@ -227,6 +234,30 @@ class Settings:
                 "API_CONTROL_EXCLUDE_HEADER",
                 bool(control_config.get("exclude_header", True)),
             ),
+            control_metadata_file_enabled=_read_bool(
+                "CONTROL_FILE_ENABLED",
+                bool(control_file_config.get("enabled", False)),
+            ),
+            control_metadata_file_extension=os.getenv(
+                "CONTROL_FILE_EXTENSION",
+                str(control_file_config.get("extension", "ctrl")),
+            ).lower(),
+            control_metadata_business_date_source=os.getenv(
+                "CONTROL_FILE_BUSINESS_DATE_SOURCE",
+                str(control_file_config.get("business_date_source", "asofdate")),
+            ).lower(),
+            control_metadata_business_date_format=os.getenv(
+                "CONTROL_FILE_BUSINESS_DATE_FORMAT",
+                str(control_file_config.get("business_date_format", "%Y%m%d")),
+            ),
+            control_metadata_business_date_format_label=os.getenv(
+                "CONTROL_FILE_BUSINESS_DATE_FORMAT_LABEL",
+                str(control_file_config.get("business_date_format_label", "yyyyMMdd")),
+            ),
+            control_metadata_default_timezone=os.getenv(
+                "CONTROL_FILE_DEFAULT_TIME_ZONE",
+                str(control_file_config.get("default_time_zone", "")),
+            ),
             verify_ssl=_read_bool(
                 "API_VERIFY_SSL", bool(api_config.get("verify_ssl", True))
             ),
@@ -364,6 +395,12 @@ class Settings:
         ):
             missing_fields.append(
                 "api.control.url or api.base_url + api.control.path_template"
+            )
+        if self.control_metadata_file_enabled and not self.control_enabled:
+            missing_fields.append("api.control.enabled must be true when control_file.enabled is true")
+        if self.control_metadata_business_date_source not in {"asofdate", "control_date"}:
+            missing_fields.append(
+                "control_file.business_date_source must be 'asofdate' or 'control_date'"
             )
 
         if missing_fields:

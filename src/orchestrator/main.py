@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from orchestrator.api_client import ApiClient
@@ -110,6 +111,98 @@ def cleanup_run_dir(run_dir: Path) -> None:
         shutil.rmtree(run_dir)
 
 
+def write_control_metadata_file(
+    output_file: Path,
+    data_file_path: Path,
+    record_count: int,
+    business_date: str,
+    business_date_format_label: str,
+    time_zone: str,
+) -> None:
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"file_name| {data_file_path.name}",
+        f"record_count| {record_count}",
+        f"business_date| {business_date}",
+        f"business_date_format| {business_date_format_label}",
+        f"time_zone| {time_zone}",
+    ]
+    output_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def resolve_control_file_business_date(
+    settings: Settings,
+    asofdate_value: str,
+    control_date_value: str | None,
+) -> str:
+    source_value = asofdate_value
+    if settings.control_metadata_business_date_source == "control_date":
+        source_value = control_date_value or asofdate_value
+
+    parsed_value = _parse_datetime_value(source_value, settings)
+    if parsed_value is None:
+        raise ValueError(
+            f"Unable to parse business date source value for control file: {source_value!r}"
+        )
+    return parsed_value.strftime(settings.control_metadata_business_date_format)
+
+
+def resolve_control_file_time_zone(settings: Settings, control_date_value: str | None) -> str:
+    if not control_date_value:
+        return settings.control_metadata_default_timezone
+
+    bracket_match = re.search(r"\[([^\]]+)\]\s*$", control_date_value)
+    if bracket_match:
+        return bracket_match.group(1)
+
+    token_match = re.search(r"\b(UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT)\b", control_date_value)
+    if token_match:
+        return token_match.group(1)
+
+    normalized = control_date_value.strip()
+    if normalized.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", normalized):
+        return "UTC"
+    if re.search(r"[+-]\d{2}\.\d{2}$", normalized):
+        return "UTC"
+
+    return settings.control_metadata_default_timezone
+
+
+def _parse_datetime_value(raw_value: str, settings: Settings) -> datetime | None:
+    candidate = raw_value.strip()
+    if not candidate:
+        return None
+
+    for date_format in _candidate_asofdate_input_formats(settings):
+        try:
+            return datetime.strptime(candidate, date_format)
+        except ValueError:
+            continue
+
+    for date_format in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(candidate, date_format)
+        except ValueError:
+            continue
+
+    normalized = re.sub(r"\s*T\s*", "T", candidate)
+    if "[" in normalized and normalized.endswith("]"):
+        normalized = normalized.split("[", 1)[0]
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    if len(normalized) >= 6 and (normalized[-6] in {"+", "-"}) and normalized[-3] == ".":
+        normalized = f"{normalized[:-3]}:{normalized[-2:]}"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def main() -> int:
     args = parse_args()
     settings = Settings.from_sources(args.config)
@@ -153,6 +246,8 @@ def main() -> int:
                 with metrics.track("download_csv", table=table):
                     client.download_csv(table, business_date, file_path)
                 metrics.increment("downloads_success")
+                control_validation_succeeded = False
+                control_details = None
 
                 if settings.control_enabled:
                     with metrics.track("fetch_control_response", table=table):
@@ -205,8 +300,46 @@ def main() -> int:
                                 )
                             else:
                                 metrics.increment("control_validation_success")
+                                control_validation_succeeded = True
                     else:
                         metrics.increment("control_validation_skipped")
+
+                    if settings.control_metadata_file_enabled:
+                        if control_validation_succeeded and control_details is not None:
+                            control_metadata_path = (
+                                file_path.parent
+                                / f"{file_path.stem}.{settings.control_metadata_file_extension}"
+                            )
+                            control_file_business_date = resolve_control_file_business_date(
+                                settings=settings,
+                                asofdate_value=business_date,
+                                control_date_value=control_details.record_date,
+                            )
+                            control_file_time_zone = resolve_control_file_time_zone(
+                                settings=settings,
+                                control_date_value=control_details.record_date,
+                            )
+                            with metrics.track("write_control_file", table=table):
+                                write_control_metadata_file(
+                                    output_file=control_metadata_path,
+                                    data_file_path=file_path,
+                                    record_count=control_details.record_count,
+                                    business_date=control_file_business_date,
+                                    business_date_format_label=settings.control_metadata_business_date_format_label,
+                                    time_zone=control_file_time_zone,
+                                )
+                            metrics.increment("control_file_created")
+                            LOGGER.info(
+                                "Control metadata file created",
+                                extra={
+                                    "context": {
+                                        "table": table,
+                                        "control_file": str(control_metadata_path),
+                                    }
+                                },
+                            )
+                        else:
+                            metrics.increment("control_file_skipped")
 
                 if settings.hdfs_enabled:
                     with metrics.track("upload_hdfs", table=table):
